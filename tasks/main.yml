@@ -1,0 +1,130 @@
+---
+# tasks file for k3s-airgap
+- name: installing depedencies
+  package:
+    name: podman
+    state: present
+
+- name: install podman container plugin
+  shell: ansible-galaxy collection install containers.podman
+
+- name: create local registry directory
+  file:
+    path: /var/lib/registry
+    state: directory
+    owner: "{{ lookup('env', 'USER') }}"
+    group: "{{ lookup('env', 'USER') }}"
+    mode: 0775
+    recurse: true
+
+    #- name: deploy the local registry
+    #  containers.podman.podman_container:
+    #    name: registry
+    #    state: started
+    #    volume:
+    #    - /var/lib/registry
+    #    volume_from:
+    #    - /var/lib/registry 
+    #    detach: true
+    #    ports:
+    #    - "5000:5000"
+    #    restart_policy: "always"
+    #    restart" true
+- name: verify the registry container doesn't exist
+  shell: podman ps
+  register: reg
+
+- name: delete container if exist
+  shell: podman stop registry; podman rm registry
+  when: reg.rc == 0
+
+- name: deploy local registry
+  shell: podman run --privileged -d --name registry -p 5000:5000 -v /var/lib/registry:/var/lib/registry --restart=always registry:2
+
+- name: edit the registry config file
+  lineinfile:
+    dest: /etc/containers/registries.conf
+    state: present
+    insertafter: '\[registries.insecure\]'
+    regexp: '^registries = \[\]'
+    line: "registries = ['localhost:5000']"
+    
+    #- name: remove k3s directory if exist
+    #file:
+    #path: /usr/local/bin/k3s
+    #state: absent
+
+- name: ensure k3s directory exist and executable
+  file:
+    path: /usr/local/bin/k3s/
+    state: directory
+    owner: root
+    group: root
+    mode: 0775
+    recurse: true
+    force: true
+
+- name: set file context
+  sefcontext:
+    target: '/usr/local/bin/k3s(/.*)?'
+    setype: container_runtime_exec_t
+    state: present 
+
+- name: create the image directory
+  file:
+    path: /var/lib/rancher/k3s/agent/images/
+    state: directory
+    owner: "{{ lookup('env', 'USER') }}"
+    group: "{{ lookup('env', 'USER') }}"
+    mode: 0755
+    recurse: true
+
+- name: obtain k3s binary
+  get_url:
+    url: https://github.com/k3s-io/k3s/releases/download/v1.21.0%2Bk3s1/k3s
+    dest: /usr/local/bin/k3s
+
+- name: obtain the images tar files
+  get_url:
+    url: https://github.com/k3s-io/k3s/releases/download/v1.21.0%2Bk3s1/k3s-airgap-images-amd64.tar
+    dest: /var/lib/rancher/k3s/agent/images/
+- name: create the image directory
+  file:
+    path: /var/lib/rancher/k3s/agent/images/
+    state: directory
+    owner: "{{ lookup('env', 'USER') }}"
+    group: "{{ lookup('env', 'USER') }}"
+    mode: 0775
+    recurse: true
+
+- name: obtain k3s binary
+  get_url:
+    url: https://github.com/k3s-io/k3s/releases/download/v1.21.0%2Bk3s1/k3s
+    dest: /usr/local/bin/k3s
+
+- name: obtain the images tar files
+  get_url:
+    url: https://github.com/k3s-io/k3s/releases/download/v1.21.0%2Bk3s1/k3s-airgap-images-amd64.tar
+    dest: /var/lib/rancher/k3s/agent/images/
+
+- name: obtain k3s install script
+  get_url:
+    url: https://get.k3s.io/?__hstc=263286291.2f098316460062dd626a561da9fdbcc6.1619448841686.1619724529768.1619806514325.11&__hssc=263286291.1.1619806514325&__hsfp=2366425560
+    dest: /usr/local/bin/install.sh
+
+- name: make script executable
+  file: 
+    path: /usr/local/bin/install.sh
+    state: file
+    owner: "{{ lookup('env', 'USER') }}"
+    group: "{{ lookup('env', 'USER') }}"
+    mode: 0775
+
+- name: install k3s 
+  environment: 
+    INSTALL_K3S_SKIP_DOWNLOAD: true 
+  shell: bash -x /usr/local/bin/install.sh
+  register: result
+
+- debug: 
+    var: result
